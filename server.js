@@ -301,7 +301,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method !== 'POST') {
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('복불복 만두 서버 작동 중 🥟');
+    res.end('복불복 만두 서버 작동 중 🥟\n버전: 4 (카카오+디스코드)\n디스코드: ' + (D.enabled() ? '켜짐 ✅' : '꺼짐 ❌ (Render Environment 확인)') + '\n디스코드 명령어: ' + D.status.commands);
     return;
   }
   const chunks = [];
@@ -352,7 +352,7 @@ if (require.main === module) {
   server.listen(PORT, () => console.log('복불복 만두 서버 시작: 포트 ' + PORT));
   if (D.enabled()) {
     D.registerCommands().catch(e => console.error('디스코드 명령어 등록 실패', e));
-    setInterval(() => { if (lastBase) D.sweep(lastBase); }, 30 * 1000);
+    setInterval(() => D.sweep(), 10 * 60 * 1000);
     console.log('디스코드 봇 켜짐');
   }
 }
