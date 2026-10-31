@@ -13,6 +13,7 @@
 const crypto = require('crypto');
 const G = require('./game.js');
 const { ITEM_LIST, MAX_HP, cut, prio } = G;
+const RK = require('./rank.js');           // 랭크
 const T = G.THEMES.POISON;                 // 디스코드 테마
 const IT = k => T.items[k];               // 아이템 표시 정보 {name, icon, img, desc}
 const hearts = hp => G.hearts(hp, T);
@@ -90,6 +91,11 @@ const COMMANDS = [{
   options: [
     { type: 1, name: '대결', description: '대결 상대를 모집해요',
       options: [{ type: 6, name: '상대', description: '이 사람만 참가할 수 있게 (비우면 아무나)', required: false }] },
+    { type: 1, name: '랭크전', description: '점수가 걸린 랭크전 상대를 모집해요',
+      options: [{ type: 6, name: '상대', description: '이 사람만 참가할 수 있게 (비우면 아무나)', required: false }] },
+    { type: 1, name: '랭킹', description: '이 서버의 독배 랭킹 TOP 10' },
+    { type: 1, name: '내정보', description: '내 티어와 전적 (다른 사람도 볼 수 있어요)',
+      options: [{ type: 6, name: '유저', description: '이 사람 정보 보기 (비우면 나)', required: false }] },
     { type: 1, name: '규칙', description: '자세한 규칙을 나만 보이게 보여줘요' },
     { type: 1, name: '아이템', description: '아이템 도감을 나만 보이게 보여줘요' }
   ]
@@ -156,10 +162,19 @@ function rulesEmbeds() {
     '🔮수정구를 쓰면 👀결과 보기 버튼이 생기고, 쓴 사람만 눌러서 결과를 볼 수 있어요.\n' +
     '자기 차례에 ' + G.timeText(config.TURN_TIMEOUT) + ' 안에 안 하면 차례가 넘어가고, ' + G.AFK_LOSE + '번 연속으로 놓치면 져요.';
   const [part2, part3] = G.rulesCommon(T);
+  const part4 = '• /독배 랭크전 으로 모집하면 점수가 걸려요. /독배 대결 은 점수 없이 그냥 놀기\n' +
+    '• 처음 점수는 ' + RK.START + '점, 처음 ' + RK.PLACEMENT + '판은 배치 게임이라 점수가 크게 움직여요\n' +
+    '• 나보다 점수 높은 사람을 이기면 많이 오르고, 낮은 사람한테 지면 많이 떨어져요\n' +
+    '• 🔥 ' + RK.STREAK_FROM + '연승부터 이길 때마다 +' + RK.STREAK_BONUS + ' 보너스\n' +
+    '• 항복, 시간 초과 패배도 패배로 쳐요\n' +
+    '• 같은 상대와는 하루에 ' + RK.PAIR_LIMIT + '판까지만 점수가 바뀌어요\n' +
+    '• /독배 랭킹 서버 순위, /독배 내정보 내 티어와 전적\n\n' +
+    '【연회 신분 티어】\n' + RK.tierListText();
   return [
     { title: '📖 튜토리얼 (1/3) 기본 규칙', description: part1, color: 0xE67E22 },
     { title: part2.split('\n')[0], description: part2.split('\n').slice(2).join('\n'), color: 0x1ABC9C },
-    { title: part3.split('\n')[0], description: part3.split('\n').slice(2).join('\n'), color: 0xF1C40F }
+    { title: part3.split('\n')[0], description: part3.split('\n').slice(2).join('\n'), color: 0xF1C40F },
+    { title: '🏆 랭크', description: part4, color: 0x8E1B2B }
   ];
 }
 
@@ -175,14 +190,15 @@ function itemBookEmbed(base) {
 function lobbyMessage(lb, base) {
   return {
     embeds: [{
-      title: '☠️ 독배 게임 대결 모집!',
-      description: '**' + lb.ownerName + '**님이 ' + (lb.invite ? '<@' + lb.invite + '>님에게 대결을 신청했어요!' : '대결 상대를 찾고 있어요!') +
+      title: lb.ranked ? '🏆 독배 랭크전 모집!' : '☠️ 독배 게임 대결 모집!',
+      description: '**' + lb.ownerName + '**' + (lb.ownerTier ? ' (' + lb.ownerTier + ')' : '') + '님이 ' +
+        (lb.invite ? '<@' + lb.invite + '>님에게 ' + (lb.ranked ? '랭크전을' : '대결을') + ' 신청했어요!' : (lb.ranked ? '랭크전 상대를 찾고 있어요! 점수가 걸린 진검승부 🏆' : '대결 상대를 찾고 있어요!')) +
         '\n\n술상 위의 독배를 피해서 상대 생명을 먼저 0으로 만들면 승리!\n참가하면 둘만의 게임 방이 열려요. 처음이면 📖규칙을 눌러보세요.',
       color: 0x8E1B2B,
       image: { url: imgUrl(base, ev('ev_match')) }
     }],
     components: rowsOf([
-      button('🍷 참가하기', 'md:join:' + lb.id, 3),
+      button(lb.ranked ? '🏆 참가하기' : '🍷 참가하기', 'md:join:' + lb.id, 3),
       button('📖 규칙', 'md:rules', 2),
       button('❌ 취소', 'md:cancel:' + lb.id, 4)
     ])
@@ -199,14 +215,14 @@ function boardMessage(g, base) {
   const log = g.log.slice(-12).map(l => (freshSet.has(l) ? '**' + l + '**' : l)).join('\n');
   const flags = p => (g.asleep[p] ? ' 💤' : '') + (g.boomerang[p] ? ' 🪃' : '');
   const fields = [0, 1].map(p => ({
-    name: (!g.over && g.turn === p ? '👉 ' : '') + g.names[p] + flags(p),
+    name: (!g.over && g.turn === p ? '👉 ' : '') + g.names[p] + (g.ranked ? '  ' + RK.tierText(g.ranked.players[p].r) : '') + flags(p),
     value: hearts(g.hp[p]) + '\n🎒 ' + bag(g.items[p]),
     inline: true
   }));
   let footer;
   if (g.over) footer = g.threadId ? '게임 끝! 🧹 이 게임 방은 ' + Math.round(config.DELETE_AFTER / 1000) + '초 뒤에 사라져요' : '게임 끝! 다시 하려면 ⚔️새 대결을 눌러주세요';
   else if (g.stealing) footer = '🤲 ' + g.names[g.turn] + '님이 뺏을 아이템을 고르는 중...';
-  else footer = '🕯️ ' + g.round + '번째 술상 · 남은 잔 ' + g.shells.length + '잔' + (g.chili ? ' · 🐍 맹독 들어감' : '') +
+  else footer = (g.ranked ? '🏆 랭크전 · ' : '') + '🕯️ ' + g.round + '번째 술상 · 남은 잔 ' + g.shells.length + '잔' + (g.chili ? ' · 🐍 맹독 들어감' : '') +
     '  ▶ ' + g.names[g.turn] + '님 차례';
 
   const embed = {
@@ -217,10 +233,11 @@ function boardMessage(g, base) {
     footer: { text: footer }
   };
   if (g.lastImg) embed.image = { url: imgUrl(base, g.lastImg) };
+  if (g.over && g.rankOut) fields.push({ name: '🏆 랭크 결과', value: cut(rankLines(g), 1024), inline: false });
 
   let rows;
   if (g.over) {
-    rows = g.threadId ? [] : rowsOf([button('⚔️ 새 대결', 'md:new', 3), button('📖 규칙', 'md:rules', 2)]);
+    rows = g.threadId ? [] : rowsOf([button('⚔️ 새 대결', 'md:new', 3), button('🏆 랭크전', 'md:newr', 1), button('📖 규칙', 'md:rules', 2)]);
   } else if (g.stealing) {
     const choices = [...new Set(G.stealChoices(g, g.turn))].slice(0, 9);
     const b = choices.map(it => button(IT(it).icon + ' ' + IT(it).name + ' 훔치기', 'md:steal:' + g.v + ':' + ITEM_LIST.indexOf(it), 1));
@@ -250,12 +267,83 @@ function resultEmbed(g, base) {
   return {
     embeds: [{
       title: '☠️ 독배 게임 대결 결과',
-      description: text + '\n' + g.round + '번째 술상에서 끝났어요. 다음 판은 /독배 대결!',
+      description: text + '\n' + g.round + '번째 술상에서 끝났어요.' + (g.rankOut ? '\n\n' + rankLines(g) : '\n다음 판은 /독배 대결!'),
       color: g.result === -2 ? 0x95A5A6 : 0xF1C40F,
       thumbnail: { url: imgUrl(base, ev(g.result === -2 ? 'ev_draw' : 'ev_win')) }
     }],
-    components: rowsOf([button('⚔️ 새 대결', 'md:new', 3)]),
+    components: rowsOf([button('⚔️ 새 대결', 'md:new', 3), button('🏆 랭크전', 'md:newr', 1)]),
     allowed_mentions: { parse: [] }
+  };
+}
+
+// ---------- 랭크 ----------
+const activeRanked = new Set();   // 지금 랭크전 중인 사람 (동시에 두 판 못 하게)
+
+async function prepRank(guild, players, names) {
+  const [loaded, cnt] = await Promise.all([
+    RK.loadPlayers(guild, players.map((uid, i) => ({ uid, name: names[i] }))),
+    RK.pairCount(guild, players[0], players[1])
+  ]);
+  return { guild, players: loaded, counted: cnt <= RK.PAIR_LIMIT, pairNo: cnt };
+}
+
+function finalizeRank(g) {
+  if (!g.ranked || g.rankOut) return;
+  const res = g.result === -2 ? 'D' : g.result === 0 ? 'A' : 'B';
+  const [pa, pb] = g.ranked.players;
+  g.rankOut = RK.compute(pa, pb, res, g.ranked.counted);
+  for (const uid of g.players) activeRanked.delete(uid);
+  RK.save(g.ranked.guild, [pa, pb]).catch(() => {});
+}
+
+function rankLines(g) {
+  const o = g.rankOut;
+  const line = (p, x) => {
+    const sign = x.delta > 0 ? '+' + x.delta : String(x.delta);
+    let t = RK.tierText(x.now) + ' **' + p.name + '**  ' + x.old + ' → ' + x.now + ' (' + sign + ')';
+    if (x.bonus) t += ' 🔥' + p.s + '연승 +' + x.bonus;
+    const placing = RK.games(p) <= RK.PLACEMENT;
+    if (x.tierUp) t += '\n　🎉 ' + RK.tierText(x.now) + ' 승급!';
+    if (x.tierDown && !placing) t += '\n　📉 ' + RK.tierText(x.now) + '(으)로 강등...';
+    if (RK.games(p) <= RK.PLACEMENT) t += '  (배치 ' + RK.games(p) + '/' + RK.PLACEMENT + ')';
+    return t;
+  };
+  let s = line(g.ranked.players[0], o.a) + '\n' + line(g.ranked.players[1], o.b);
+  if (!o.counted) s += '\n※ 오늘 이 상대와 ' + RK.PAIR_LIMIT + '판을 넘어서 점수는 그대로예요 (전적만 기록)';
+  return s;
+}
+
+async function rankingEmbed(guild, base) {
+  const { list, total } = await RK.top(guild, 10);
+  const medal = ['🥇', '🥈', '🥉'];
+  const lines = list.map((x, i) => (medal[i] || '`' + (i + 1) + '.`') + ' ' + RK.tierText(x.r) + ' **' + cut(x.name, 20) + '** — ' + x.r + '점 (' + x.w + '승 ' + x.l + '패)');
+  return {
+    title: '🏆 독배 랭킹 TOP 10',
+    description: lines.length ? lines.join('\n') : '아직 랭크전 기록이 없어요. /독배 랭크전 으로 첫 기록을 세워보세요!',
+    color: 0xF1C40F,
+    thumbnail: { url: imgUrl(base, ev('ev_win')) },
+    footer: { text: '랭크 참가자 ' + total + '명' }
+  };
+}
+
+async function profileEmbed(guild, uid, name, base) {
+  const { p, rank, total, played } = await RK.profile(guild, uid, name);
+  if (!played) {
+    return { title: '🍷 ' + name, description: '아직 랭크전 기록이 없어요. /독배 랭크전 으로 시작해 보세요!\n처음 점수는 ' + RK.START + '점이에요.', color: 0x8E1B2B };
+  }
+  const g = RK.games(p);
+  const rate = g ? Math.round(p.w / g * 100) : 0;
+  const streak = p.s > 1 ? '🔥 ' + p.s + '연승 중' : p.s < -1 ? '💀 ' + (-p.s) + '연패 중' : '-';
+  return {
+    title: RK.tierText(p.r) + '  ' + name,
+    description: '**' + p.r + '점**' + (rank ? '  ·  서버 ' + rank + '위 / ' + total + '명' : '') + '\n' + RK.progressBar(p.r) +
+      (g < RK.PLACEMENT ? '\n📋 배치 게임 ' + g + '/' + RK.PLACEMENT : ''),
+    color: 0x8E1B2B,
+    fields: [
+      { name: '전적', value: p.w + '승 ' + p.l + '패' + (p.d ? ' ' + p.d + '무' : '') + ' (승률 ' + rate + '%)', inline: true },
+      { name: '연속', value: streak, inline: true },
+      { name: '최고 점수', value: p.best + '점 (' + RK.tierText(p.best) + ')', inline: true }
+    ]
   };
 }
 
@@ -271,7 +359,7 @@ function makeGame(channelId, players, names, extra) {
       if (p === null) { log.push(t); pending.push({ t, img }); }
       else if (gameRef) gameRef.peek = { p, text: t }; // 나만 보이는 소식 (투시안경)
     },
-    onEnd: r => { if (gameRef) gameRef.result = r; }
+    onEnd: r => { if (gameRef) { gameRef.result = r; finalizeRank(gameRef); } }
   }, extra || {}));
   gameRef = g;
   games[channelId] = g;
@@ -357,15 +445,32 @@ async function handleInteraction(it, base) {
     const name = sub && sub.name;
     if (name === '규칙') return done({ type: 4, data: { flags: EPHEMERAL, embeds: rulesEmbeds() } });
     if (name === '아이템') return done({ type: 4, data: { flags: EPHEMERAL, embeds: [itemBookEmbed(base)] } });
-    if (name === '대결') {
+    if (name === '랭킹' || name === '내정보') {
+      if (!it.guild_id) return reply('서버 채널에서만 볼 수 있어요.');
+      if (!RK.enabled()) return reply('랭크 기능이 아직 준비 중이에요. (서버에 데이터베이스 연결이 필요해요)');
+      try {
+        if (name === '랭킹') return done({ type: 4, data: { embeds: [await rankingEmbed(it.guild_id, base)] } });
+        const opt = (sub.options || []).find(o => o.name === '유저');
+        const target = opt ? opt.value : uid;
+        const ru = (it.data.resolved && it.data.resolved.users && it.data.resolved.users[target]) || {};
+        const rm = (it.data.resolved && it.data.resolved.members && it.data.resolved.members[target]) || {};
+        const tname = target === uid ? displayName(it) : cut(rm.nick || ru.global_name || ru.username || '손님', 20);
+        return done({ type: 4, data: { embeds: [await profileEmbed(it.guild_id, target, tname, base)] } });
+      } catch (e) {
+        return reply('랭크 기록을 불러오지 못했어요. 잠시 뒤에 다시 해주세요.');
+      }
+    }
+    if (name === '대결' || name === '랭크전') {
+      const ranked = name === '랭크전';
       if (!it.guild_id) return reply('서버 채널에서만 할 수 있어요.');
+      if (ranked && !RK.enabled()) return reply('랭크 기능이 아직 준비 중이에요. 지금은 /독배 대결 로 놀아주세요!');
       if (isThreadChannel(it) || (g && g.threadId)) return reply('게임 방 안에서는 새 대결을 못 만들어요. 원래 채널에서 해주세요!');
       const opt = (sub.options || []).find(o => o.name === '상대');
       const invite = opt ? opt.value : null;
       if (invite === uid) return reply('자기 자신에게는 신청할 수 없어요.');
       const resolved = (it.data.resolved && it.data.resolved.users) || {};
       if (invite && resolved[invite] && resolved[invite].bot) return reply('봇과는 대결할 수 없어요.');
-      return newLobbyReply(it, channelId, uid, invite, base);
+      return newLobbyReply(it, channelId, uid, invite, base, ranked);
     }
     return reply('알 수 없는 명령이에요.');
   }
@@ -376,9 +481,10 @@ async function handleInteraction(it, base) {
 
     if (action === 'rules') return done({ type: 4, data: { flags: EPHEMERAL, embeds: rulesEmbeds() } });
 
-    if (action === 'new') {
+    if (action === 'new' || action === 'newr') {
       if (isThreadChannel(it)) return reply('원래 채널에서 /독배 대결 을 해주세요!');
-      return newLobbyReply(it, channelId, uid, null, base);
+      if (action === 'newr' && !RK.enabled()) return reply('랭크 기능이 아직 준비 중이에요.');
+      return newLobbyReply(it, channelId, uid, null, base, action === 'newr');
     }
 
     // ----- 모집 카드 -----
@@ -396,17 +502,30 @@ async function handleInteraction(it, base) {
       if (uid === lb.owner) return reply('자기 대결에는 참가할 수 없어요. 친구를 기다려 주세요!');
       if (lb.invite && uid !== lb.invite) return reply('이 대결은 <@' + lb.invite + '>님만 참가할 수 있어요.');
       if (lb.starting) return reply('다른 사람이 먼저 참가했어요!');
+      if (lb.ranked && (activeRanked.has(uid) || activeRanked.has(lb.owner))) {
+        return reply(activeRanked.has(uid) ? '이미 다른 랭크전을 하고 있어요! 끝나고 참가해 주세요.' : '모집한 사람이 지금 다른 랭크전 중이에요.');
+      }
       lb.starting = true;
 
       const players = [lb.owner, uid];
       const names = [lb.ownerName, displayName(it)];
 
-      // 1) 게임 방(스레드) 열기
-      const threadId = await openGameRoom(lb, players, names);
+      // 1) 게임 방(스레드) 열기 + 랭크 기록 불러오기를 동시에
+      const [threadId, rk] = await Promise.all([
+        openGameRoom(lb, players, names),
+        lb.ranked ? prepRank(it.guild_id, players, names).catch(() => null) : Promise.resolve(null)
+      ]);
+      if (lb.ranked && !rk) {
+        lb.starting = false;
+        if (threadId) deleteRoom(threadId).catch(() => {});
+        return reply('랭크 기록을 불러오지 못했어요. 잠시 뒤에 다시 눌러주세요.');
+      }
+      if (rk) for (const p of players) activeRanked.add(p);
+      const rankExtra = rk ? { ranked: rk } : {};
       if (threadId) {
-        const game = makeGame(threadId, players, names, {
+        const game = makeGame(threadId, players, names, Object.assign({
           threadId, parentId: lb.channelId, lobbyToken: lb.token, lobbyAt: lb.created
-        });
+        }, rankExtra));
         const first = boardMessage(game, base);
         first.content = '<@' + players[0] + '> vs <@' + players[1] + '> 게임 방이 열렸어요! 여기서 게임하면서 채팅도 할 수 있어요 🍷';
         first.allowed_mentions = { users: players };
@@ -419,7 +538,7 @@ async function handleInteraction(it, base) {
           }
           return done({ type: 7, data: {
             embeds: [{
-              title: '⚔️ ' + names[0] + ' vs ' + names[1] + ' 대결 중!',
+              title: (rk ? '🏆 ' : '⚔️ ') + names[0] + ' vs ' + names[1] + (rk ? ' 랭크전 중!' : ' 대결 중!'),
               description: '게임 방 → <#' + threadId + '>\n' + (config.THREAD_MODE === 'private' ? '두 사람만 들어갈 수 있는 방이에요.' : '들어가서 구경하고 응원해 주세요!'),
               color: 0xE8432C,
               thumbnail: { url: imgUrl(base, ev('ev_match')) }
@@ -436,10 +555,11 @@ async function handleInteraction(it, base) {
       const here = games[channelId];
       if (here && !here.over) {
         lb.starting = false;
+        if (rk) for (const p of players) activeRanked.delete(p);
         return reply('게임 방을 못 열었고, 이 채널에선 이미 게임 중이에요. 잠시 뒤에 다시 눌러주세요.');
       }
       delete lobbies[idStr];
-      g = makeGame(channelId, players, names, {});
+      g = makeGame(channelId, players, names, rankExtra);
       return board();
     }
 
@@ -508,7 +628,7 @@ async function handleInteraction(it, base) {
   return { json: { type: 1 } };
 }
 
-function newLobbyReply(it, channelId, uid, invite, base) {
+async function newLobbyReply(it, channelId, uid, invite, base, ranked) {
   for (const id of Object.keys(lobbies)) {
     const lb = lobbies[id];
     if (lb.owner === uid && Date.now() - lb.created < config.LOBBY_TIMEOUT) {
@@ -517,14 +637,21 @@ function newLobbyReply(it, channelId, uid, invite, base) {
   }
   const lb = {
     id: String(it.id || Date.now()), channelId, owner: uid, ownerName: displayName(it),
-    invite: invite || null, created: Date.now(), token: it.token, starting: false
+    invite: invite || null, created: Date.now(), token: it.token, starting: false, ranked: !!ranked, ownerTier: null
   };
+  if (ranked) {
+    try {
+      const [p] = await RK.loadPlayers(it.guild_id, [{ uid, name: lb.ownerName }]);
+      lb.ownerTier = RK.tierText(p.r) + ' ' + p.r + '점';
+    } catch (e) { /* 티어 표시는 못 해도 모집은 열어요 */ }
+  }
   lobbies[lb.id] = lb;
   return { json: { type: 4, data: lobbyMessage(lb, base) } };
 }
 
 // 주기적으로: 시간 초과된 게임 끝내기, 끝난 게임 방 치우기, 오래된 모집 지우기
 function sweep(base) {
+  if (RK.enabled()) RK.flushRetries().catch(() => {});
   for (const id of Object.keys(lobbies)) {
     if (Date.now() - lobbies[id].created > config.LOBBY_TIMEOUT) delete lobbies[id];
   }
@@ -541,6 +668,6 @@ function sweep(base) {
 }
 
 module.exports = {
-  verify, handleInteraction, registerCommands, sweep, setFetch, games, lobbies, status, config,
+  verify, handleInteraction, registerCommands, sweep, setFetch, games, lobbies, status, config, activeRanked,
   enabled: () => !!(APP_ID && PUBLIC_KEY)
 };
