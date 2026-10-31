@@ -22,7 +22,7 @@ const TOKEN = (process.env.DISCORD_TOKEN || '').trim();
 const config = {
   THREAD_MODE: 'public',          // 'public': 누구나 들어와서 구경·채팅 / 'private': 두 사람만 / 'off': 채널에서 바로
   DELETE_AFTER: 60 * 1000,        // 게임이 끝나고 게임 방이 사라질 때까지 (1분)
-  TURN_TIMEOUT: 5 * 60 * 1000,    // 자기 차례에 5분 동안 안 하면 시간 초과 패
+  TURN_TIMEOUT: 90 * 1000,        // 자기 차례 1분 30초 (넘기면 건너뛰기, 연속 2번이면 패배)
   LOBBY_TIMEOUT: 30 * 60 * 1000,  // 아무도 참가 안 한 모집은 30분 뒤 사라짐
   API_WAIT: 1100                  // 스레드 만들 때 디스코드 대답을 기다리는 최대 시간 (ms)
 };
@@ -148,7 +148,7 @@ function rulesEmbeds() {
     '【버튼】\n' +
     '게임판 아래 버튼은 자기 차례인 사람만 누를 수 있어요. 아이템 버튼을 누르면 바로 써져요.\n' +
     '👓투시안경을 쓰면 👀결과 보기 버튼이 생기고, 쓴 사람만 눌러서 결과를 볼 수 있어요.\n' +
-    '자기 차례에 5분 동안 아무것도 안 하면 시간 초과로 져요.';
+    '자기 차례에 ' + G.timeText(config.TURN_TIMEOUT) + ' 안에 안 하면 차례가 넘어가고, ' + G.AFK_LOSE + '번 연속으로 놓치면 져요.';
   const [part2, part3] = G.rulesCommon();
   return [
     { title: '📖 튜토리얼 (1/3) 기본 규칙', description: part1, color: 0xE67E22 },
@@ -319,10 +319,10 @@ function scheduleCleanup(g, base) {
 
 function checkTimeout(g) {
   if (!g || g.over) return false;
-  if (Date.now() - g.last <= config.TURN_TIMEOUT) return false;
-  g.stealing = false;
-  G.timeout(g, Math.round(config.TURN_TIMEOUT / 60000));
+  const r = G.checkAfk(g, config.TURN_TIMEOUT);
+  if (r === 'none') return false;
   g.v++;
+  g.boardStale = true;
   return true;
 }
 
@@ -339,6 +339,8 @@ async function handleInteraction(it, base) {
   const reply = content => done({ type: 4, data: { content, flags: EPHEMERAL } });
   const board = () => {
     const data = boardMessage(g, base);
+    g.boardStale = false;
+    if (it.message && it.message.id) g.boardMsgId = it.message.id;
     if (g.over) scheduleCleanup(g, base);
     return done({ type: 7, data });
   };
@@ -439,7 +441,7 @@ async function handleInteraction(it, base) {
     if (!g) return reply('이 게임은 이미 끝났어요. /만두 대결 로 새로 시작해 주세요.');
     const v = Number(idStr);
 
-    if (timedOut) return board();
+    if (timedOut || g.boardStale) return board();
     if (v !== g.v) return reply(g.over ? '이 게임은 끝났어요.' : '이미 지나간 화면이에요. 가장 최신 게임판에서 눌러주세요.');
     if (g.over) return reply('이 게임은 끝났어요.');
 
@@ -522,15 +524,13 @@ function sweep(base) {
   }
   for (const ch of Object.keys(games)) {
     const g = games[ch];
-    if (g.threadId) {
-      if (checkTimeout(g) && g.boardMsgId) {
-        // 아무도 안 눌러서 시간 초과로 끝났으면 게임판에도 결과를 보여줘요
-        api('PATCH', '/channels/' + g.threadId + '/messages/' + g.boardMsgId, boardMessage(g, base)).catch(() => {});
-      }
-      if (g.over) scheduleCleanup(g, base);
-    } else if (g.over && Date.now() - g.last > 6 * 60 * 60 * 1000) {
-      delete games[ch];
+    if (checkTimeout(g) && g.boardMsgId) {
+      // 시간 초과로 차례가 넘어가거나 끝나면 게임판도 바꿔줘요 (실패하면 다음 버튼 때 바뀜)
+      const body = boardMessage(g, base);
+      api('PATCH', '/channels/' + ch + '/messages/' + g.boardMsgId, body).then(r => { if (r.ok) g.boardStale = false; });
     }
+    if (g.threadId && g.over) scheduleCleanup(g, base);
+    if (!g.threadId && g.over && Date.now() - g.last > 6 * 60 * 60 * 1000) delete games[ch];
   }
 }
 
