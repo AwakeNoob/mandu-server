@@ -1,17 +1,22 @@
 /**
- * 복불복 만두 - 디스코드 봇 (라이브러리 없이 HTTP 방식)
+ * ☠️ 독배 게임 - 디스코드 봇 (라이브러리 없이 HTTP 방식)
+ * 규칙은 카톡 복불복 만두와 같고(game.js), 겉모습만 독배 테마(themes.js의 POISON)
  * Render 환경변수: DISCORD_APP_ID, DISCORD_PUBLIC_KEY, DISCORD_TOKEN
  * 디스코드 개발자 포털의 "Interactions Endpoint URL"에  https://(서버주소)/discord  를 넣어요.
  *
  * 진행 방식
- *  1) 채널에서 /만두 대결 → 모집 카드
+ *  1) 채널에서 /독배 대결 → 모집 카드
  *  2) 누가 참가하면 그 판 전용 "스레드(게임 방)"가 생기고, 거기서 게임 + 채팅
  *  3) 게임이 끝나면 결과를 원래 채널에 남기고, 게임 방은 잠시 뒤 자동 삭제
  *  스레드를 못 만들면(권한 없음, 디스코드가 잠깐 막음 등) 예전처럼 채널에서 바로 게임해요.
  */
 const crypto = require('crypto');
 const G = require('./game.js');
-const { ITEM_LIST, ICON, ITEM_DESC, MAX_HP, hearts, bag, cut, prio } = G;
+const { ITEM_LIST, MAX_HP, cut, prio } = G;
+const T = G.THEMES.POISON;                 // 디스코드 테마
+const IT = k => T.items[k];               // 아이템 표시 정보 {name, icon, img, desc}
+const hearts = hp => G.hearts(hp, T);
+const bag = items => G.bag(items, T);
 
 const API = 'https://discord.com/api/v10';
 const APP_ID = (process.env.DISCORD_APP_ID || '').trim();
@@ -80,8 +85,8 @@ async function api(method, path, body, waitMs) {
 
 // ---------- 명령어 등록 (막히면 기다렸다가 다시) ----------
 const COMMANDS = [{
-  name: '만두',
-  description: '복불복 만두 게임',
+  name: '독배',
+  description: '독배 게임',
   options: [
     { type: 1, name: '대결', description: '대결 상대를 모집해요',
       options: [{ type: 6, name: '상대', description: '이 사람만 참가할 수 있게 (비우면 아무나)', required: false }] },
@@ -115,9 +120,10 @@ async function registerCommands(attempt) {
 function userOf(it) { return (it.member && it.member.user) || it.user || {}; }
 function displayName(it) {
   const u = userOf(it);
-  return cut((it.member && it.member.nick) || u.global_name || u.username || '만두', 20);
+  return cut((it.member && it.member.nick) || u.global_name || u.username || '손님', 20);
 }
-function imgUrl(base, key) { return base + key + '.png'; }
+function imgUrl(base, key) { return base + key + (key.indexOf('p_') === 0 ? '.jpg' : '.png'); }
+function ev(key) { return T.img(key); }
 const COLOR = { ev_spicy: 0xE74C3C, ev_normal: 0xF5B041, ev_reflect: 0x1ABC9C, ev_chili_break: 0x8E44AD,
   ev_sleep: 0x34495E, ev_steamer: 0xE67E22, ev_match: 0xE8432C, ev_win: 0xF1C40F, ev_draw: 0x95A5A6 };
 
@@ -137,19 +143,19 @@ function isThreadChannel(it) {
 // ---------- 화면 ----------
 function rulesEmbeds() {
   const part1 = '【한 줄 요약】\n' +
-    '찜기 속에 매운 만두와 일반 만두가 섞여 있어요. 번갈아 가며 만두를 내가 먹거나 상대에게 먹여서, 상대의 참을성(❤️)을 먼저 0으로 만들면 이겨요!\n\n' +
+    '술상 위에 독배와 멀쩡한 잔이 섞여 있어요. 번갈아 가며 잔을 내가 마시거나 상대에게 권해서, 상대의 생명(❤️)을 먼저 0으로 만들면 이겨요!\n\n' +
     '【게임 시작】\n' +
-    '• /만두 대결 → 아무나 참가할 수 있는 모집 만들기\n' +
-    '• /만두 대결 상대:@친구 → 그 사람만 참가 가능\n' +
+    '• /독배 대결 → 아무나 참가할 수 있는 모집 만들기\n' +
+    '• /독배 대결 상대:@친구 → 그 사람만 참가 가능\n' +
     '• 누가 참가하기를 누르면 그 판 전용 게임 방(스레드)이 생겨요. 게임 방 안에서 게임하면서 채팅도 할 수 있어요!\n' +
     '• 게임이 끝나면 결과가 원래 채널에 남고, 게임 방은 1분 뒤에 사라져요\n' +
-    '• 참을성은 둘 다 ' + MAX_HP + '칸, 선공은 랜덤\n\n' +
-    G.rulesBasics() + '\n\n' +
+    '• 생명은 둘 다 ' + MAX_HP + '칸, 선공은 랜덤\n\n' +
+    G.rulesBasics(T) + '\n\n' +
     '【버튼】\n' +
     '게임판 아래 버튼은 자기 차례인 사람만 누를 수 있어요. 아이템 버튼을 누르면 바로 써져요.\n' +
-    '👓투시안경을 쓰면 👀결과 보기 버튼이 생기고, 쓴 사람만 눌러서 결과를 볼 수 있어요.\n' +
+    '🔮수정구를 쓰면 👀결과 보기 버튼이 생기고, 쓴 사람만 눌러서 결과를 볼 수 있어요.\n' +
     '자기 차례에 ' + G.timeText(config.TURN_TIMEOUT) + ' 안에 안 하면 차례가 넘어가고, ' + G.AFK_LOSE + '번 연속으로 놓치면 져요.';
-  const [part2, part3] = G.rulesCommon();
+  const [part2, part3] = G.rulesCommon(T);
   return [
     { title: '📖 튜토리얼 (1/3) 기본 규칙', description: part1, color: 0xE67E22 },
     { title: part2.split('\n')[0], description: part2.split('\n').slice(2).join('\n'), color: 0x1ABC9C },
@@ -160,23 +166,23 @@ function rulesEmbeds() {
 function itemBookEmbed(base) {
   return {
     title: '🎒 아이템 도감',
-    description: ITEM_LIST.map(i => ICON[i] + ' **' + i + '**: ' + ITEM_DESC[i]).join('\n'),
-    color: 0x5DADE2,
-    thumbnail: { url: imgUrl(base, 'it_jelly') }
+    description: ITEM_LIST.map(i => IT(i).icon + ' **' + IT(i).name + '**: ' + IT(i).desc).join('\n'),
+    color: 0x7D3C98,
+    thumbnail: { url: imgUrl(base, IT('복불복젤리').img) }
   };
 }
 
 function lobbyMessage(lb, base) {
   return {
     embeds: [{
-      title: '🥟 복불복 만두 대결 모집!',
+      title: '☠️ 독배 게임 대결 모집!',
       description: '**' + lb.ownerName + '**님이 ' + (lb.invite ? '<@' + lb.invite + '>님에게 대결을 신청했어요!' : '대결 상대를 찾고 있어요!') +
-        '\n\n찜기 속 매운 만두를 피해서 상대 참을성을 먼저 0으로 만들면 승리!\n참가하면 둘만의 게임 방이 열려요. 처음이면 📖규칙을 눌러보세요.',
-      color: 0xE8432C,
-      image: { url: imgUrl(base, 'ev_match') }
+        '\n\n술상 위의 독배를 피해서 상대 생명을 먼저 0으로 만들면 승리!\n참가하면 둘만의 게임 방이 열려요. 처음이면 📖규칙을 눌러보세요.',
+      color: 0x8E1B2B,
+      image: { url: imgUrl(base, ev('ev_match')) }
     }],
     components: rowsOf([
-      button('🥟 참가하기', 'md:join:' + lb.id, 3),
+      button('🍷 참가하기', 'md:join:' + lb.id, 3),
       button('📖 규칙', 'md:rules', 2),
       button('❌ 취소', 'md:cancel:' + lb.id, 4)
     ])
@@ -200,13 +206,13 @@ function boardMessage(g, base) {
   let footer;
   if (g.over) footer = g.threadId ? '게임 끝! 🧹 이 게임 방은 ' + Math.round(config.DELETE_AFTER / 1000) + '초 뒤에 사라져요' : '게임 끝! 다시 하려면 ⚔️새 대결을 눌러주세요';
   else if (g.stealing) footer = '🤲 ' + g.names[g.turn] + '님이 뺏을 아이템을 고르는 중...';
-  else footer = '♨️ ' + g.round + '번째 찜기 · 남은 만두 ' + g.shells.length + '개' + (g.chili ? ' · 🌶️ 청양고추 들어감' : '') +
+  else footer = '🕯️ ' + g.round + '번째 술상 · 남은 잔 ' + g.shells.length + '잔' + (g.chili ? ' · 🐍 맹독 들어감' : '') +
     '  ▶ ' + g.names[g.turn] + '님 차례';
 
   const embed = {
-    title: cut(g.lastTitle || '🥟 복불복 만두', 256),
-    description: cut(log || '🥟', 4000),
-    color: COLOR[g.lastImg] || 0xE67E22,
+    title: cut(g.lastTitle || T.title, 256),
+    description: cut(log || '🍷', 4000),
+    color: COLOR[(g.lastImg || '').replace(/^p_/, '')] || 0x8E1B2B,
     fields,
     footer: { text: footer }
   };
@@ -217,21 +223,21 @@ function boardMessage(g, base) {
     rows = g.threadId ? [] : rowsOf([button('⚔️ 새 대결', 'md:new', 3), button('📖 규칙', 'md:rules', 2)]);
   } else if (g.stealing) {
     const choices = [...new Set(G.stealChoices(g, g.turn))].slice(0, 9);
-    const b = choices.map(it => button(ICON[it] + ' ' + it + ' 뺏기', 'md:steal:' + g.v + ':' + ITEM_LIST.indexOf(it), 1));
+    const b = choices.map(it => button(IT(it).icon + ' ' + IT(it).name + ' 훔치기', 'md:steal:' + g.v + ':' + ITEM_LIST.indexOf(it), 1));
     b.push(button('↩️ 그만두기', 'md:nosteal:' + g.v, 2));
     rows = rowsOf(b);
   } else {
     const main1 = [
-      button('😋 먹기', 'md:eat:' + g.v, 1),
-      button('🥢 먹이기', 'md:feed:' + g.v, 4),
+      button('🍷 마시기', 'md:eat:' + g.v, 1),
+      button('🫴 권하기', 'md:feed:' + g.v, 4),
       button('📖 규칙', 'md:rules', 2),
       button('🏳️ 포기', 'md:quit:' + g.v, 2)
     ];
-    if (g.peek) main1.push(button('👀 투시안경 결과', 'md:peek:' + g.v, 3));
+    if (g.peek) main1.push(button('👀 수정구 결과', 'md:peek:' + g.v, 3));
     const count = {};
     for (const i of g.items[g.turn]) count[i] = (count[i] || 0) + 1;
     const itemBtns = Object.keys(count).slice(0, 10).map(i =>
-      button(ICON[i] + ' ' + i + (count[i] > 1 ? ' ×' + count[i] : ''), 'md:use:' + g.v + ':' + ITEM_LIST.indexOf(i), 2));
+      button(IT(i).icon + ' ' + IT(i).name + (count[i] > 1 ? ' ×' + count[i] : ''), 'md:use:' + g.v + ':' + ITEM_LIST.indexOf(i), 2));
     rows = rowsOf(main1).concat(rowsOf(itemBtns));
   }
   return { embeds: [embed], components: rows.slice(0, 5) };
@@ -243,10 +249,10 @@ function resultEmbed(g, base) {
   else text = '🏆 **' + g.names[g.result] + '**님이 ' + g.names[1 - g.result] + '님을 이겼어요!';
   return {
     embeds: [{
-      title: '🥟 복불복 만두 대결 결과',
-      description: text + '\n' + g.round + '번째 찜기에서 끝났어요. 다음 판은 /만두 대결!',
+      title: '☠️ 독배 게임 대결 결과',
+      description: text + '\n' + g.round + '번째 술상에서 끝났어요. 다음 판은 /독배 대결!',
       color: g.result === -2 ? 0x95A5A6 : 0xF1C40F,
-      thumbnail: { url: imgUrl(base, g.result === -2 ? 'ev_draw' : 'ev_win') }
+      thumbnail: { url: imgUrl(base, ev(g.result === -2 ? 'ev_draw' : 'ev_win')) }
     }],
     components: rowsOf([button('⚔️ 새 대결', 'md:new', 3)]),
     allowed_mentions: { parse: [] }
@@ -259,7 +265,7 @@ function makeGame(channelId, players, names, extra) {
   const log = [];
   let gameRef = null;
   const g = G.createGame(Object.assign({
-    players, names, channelId, v: 1, log, pending, peek: null, stealing: false, result: null, cleanup: false,
+    T, players, names, channelId, v: 1, log, pending, peek: null, stealing: false, result: null, cleanup: false,
     nameOf: p => names[p],
     emit: (p, t, img) => {
       if (p === null) { log.push(t); pending.push({ t, img }); }
@@ -277,7 +283,7 @@ async function openGameRoom(lb, players, names) {
   if (config.THREAD_MODE === 'off' || !TOKEN) return null;
   const priv = config.THREAD_MODE === 'private';
   const r = await api('POST', '/channels/' + lb.channelId + '/threads', {
-    name: cut('🥟 ' + names[0] + ' vs ' + names[1], 100),
+    name: cut('☠️ ' + names[0] + ' vs ' + names[1], 100),
     type: priv ? 12 : 11,
     auto_archive_duration: 60,
     invitable: false
@@ -371,7 +377,7 @@ async function handleInteraction(it, base) {
     if (action === 'rules') return done({ type: 4, data: { flags: EPHEMERAL, embeds: rulesEmbeds() } });
 
     if (action === 'new') {
-      if (isThreadChannel(it)) return reply('원래 채널에서 /만두 대결 을 해주세요!');
+      if (isThreadChannel(it)) return reply('원래 채널에서 /독배 대결 을 해주세요!');
       return newLobbyReply(it, channelId, uid, null, base);
     }
 
@@ -380,7 +386,7 @@ async function handleInteraction(it, base) {
       const lb = lobbies[idStr];
       if (!lb || Date.now() - lb.created > config.LOBBY_TIMEOUT) {
         delete lobbies[idStr];
-        return reply('이미 끝났거나 사라진 모집이에요. /만두 대결 로 새로 만들어 주세요.');
+        return reply('이미 끝났거나 사라진 모집이에요. /독배 대결 로 새로 만들어 주세요.');
       }
       if (action === 'cancel') {
         if (uid !== lb.owner) return reply('모집한 사람만 취소할 수 있어요.');
@@ -402,7 +408,7 @@ async function handleInteraction(it, base) {
           threadId, parentId: lb.channelId, lobbyToken: lb.token, lobbyAt: lb.created
         });
         const first = boardMessage(game, base);
-        first.content = '<@' + players[0] + '> vs <@' + players[1] + '> 게임 방이 열렸어요! 여기서 게임하면서 채팅도 할 수 있어요 🥟';
+        first.content = '<@' + players[0] + '> vs <@' + players[1] + '> 게임 방이 열렸어요! 여기서 게임하면서 채팅도 할 수 있어요 🍷';
         first.allowed_mentions = { users: players };
         const posted = await api('POST', '/channels/' + threadId + '/messages', first, config.API_WAIT);
         if (posted.ok) {
@@ -416,7 +422,7 @@ async function handleInteraction(it, base) {
               title: '⚔️ ' + names[0] + ' vs ' + names[1] + ' 대결 중!',
               description: '게임 방 → <#' + threadId + '>\n' + (config.THREAD_MODE === 'private' ? '두 사람만 들어갈 수 있는 방이에요.' : '들어가서 구경하고 응원해 주세요!'),
               color: 0xE8432C,
-              thumbnail: { url: imgUrl(base, 'ev_match') }
+              thumbnail: { url: imgUrl(base, ev('ev_match')) }
             }],
             components: []
           } });
@@ -438,7 +444,7 @@ async function handleInteraction(it, base) {
     }
 
     // ----- 게임판 -----
-    if (!g) return reply('이 게임은 이미 끝났어요. /만두 대결 로 새로 시작해 주세요.');
+    if (!g) return reply('이 게임은 이미 끝났어요. /독배 대결 로 새로 시작해 주세요.');
     const v = Number(idStr);
 
     if (timedOut || g.boardStale) return board();
@@ -449,7 +455,7 @@ async function handleInteraction(it, base) {
     if (idx < 0) return reply('구경 중이에요! 채팅으로 응원해 주세요 📣');
 
     if (action === 'peek') {
-      if (!g.peek || g.peek.p !== idx) return reply('투시안경을 쓴 사람만 볼 수 있어요. 👀');
+      if (!g.peek || g.peek.p !== idx) return reply('수정구를 쓴 사람만 볼 수 있어요. 👀');
       return reply(g.peek.text);
     }
 
