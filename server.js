@@ -5,7 +5,8 @@
  * Render 환경변수에 DISCORD_TOKEN이 있으면 디스코드 봇도 같이 켜져요.
  */
 const http = require('http');
-const IMAGES = require('./images.js');
+const IMAGES = require('./images.js');                 // 카톡 만두 그림
+const IMAGES_POISON = require('./images-poison.js');  // 디코 독배 그림
 const G = require('./game.js');
 const D = require('./mandu-discord.js');
 let lastBase = null;
@@ -291,17 +292,17 @@ function baseUrl(req) {
 }
 
 const server = http.createServer((req, res) => {
-  const m = req.method === 'GET' && /^\/img\/([a-z_]+)\.png$/.exec(req.url.split('?')[0]);
+  const m = req.method === 'GET' && /^\/img\/([a-z_]+)\.(png|jpg)$/.exec(req.url.split('?')[0]);
   if (m) {
-    const data = IMAGES[m[1]];
+    const data = m[2] === 'png' ? IMAGES[m[1]] : IMAGES_POISON[m[1]];
     if (!data) { res.writeHead(404); res.end(); return; }
-    res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' });
+    res.writeHead(200, { 'Content-Type': m[2] === 'png' ? 'image/png' : 'image/jpeg', 'Cache-Control': 'public, max-age=86400' });
     res.end(Buffer.from(data, 'base64'));
     return;
   }
   if (req.method !== 'POST') {
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('복불복 만두 서버 작동 중 🥟\n버전: 5 (카카오+디스코드 게임방)\n디스코드: ' + (D.enabled() ? '켜짐 ✅' : '꺼짐 ❌ (Render Environment 확인)') + '\n디스코드 명령어: ' + D.status.commands + '\n디스코드 게임 방: ' + D.status.thread);
+    res.end('복불복 만두 서버 작동 중 🥟\n버전: 6 (카톡 만두 + 디코 독배)\n디스코드: ' + (D.enabled() ? '켜짐 ✅' : '꺼짐 ❌ (Render Environment 확인)') + '\n디스코드 명령어: ' + D.status.commands + '\n디스코드 게임 방: ' + D.status.thread);
     return;
   }
   const chunks = [];
