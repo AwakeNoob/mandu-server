@@ -302,7 +302,7 @@ const server = http.createServer((req, res) => {
   }
   if (req.method !== 'POST') {
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('복불복 만두 서버 작동 중 🥟\n버전: 6 (카톡 만두 + 디코 독배)\n디스코드: ' + (D.enabled() ? '켜짐 ✅' : '꺼짐 ❌ (Render Environment 확인)') + '\n디스코드 명령어: ' + D.status.commands + '\n디스코드 게임 방: ' + D.status.thread);
+    res.end('복불복 만두 서버 작동 중 🥟\n버전: 7 (카톡 만두 + 디코 독배 + 랭크)\n디스코드: ' + (D.enabled() ? '켜짐 ✅' : '꺼짐 ❌ (Render Environment 확인)') + '\n디스코드 명령어: ' + D.status.commands + '\n디스코드 게임 방: ' + D.status.thread + '\n랭크 기록: ' + require('./rank.js').status.db);
     return;
   }
   const chunks = [];
