@@ -248,7 +248,7 @@ function endGame(g, result) {
 function createGame(opts) {
   const g = Object.assign({
     hp: [MAX_HP, MAX_HP], items: [[], []], asleep: [false, false], boomerang: [false, false],
-    chili: false, shells: [], round: 0, turn: rand(0, 1), last: Date.now(), over: false
+    chili: false, shells: [], round: 0, turn: rand(0, 1), last: Date.now(), over: false, idle: [0, 0]
   }, opts);
   all(g, '⚔️ 매칭 성공! ' + name(g, 0) + ' vs ' + name(g, 1), 'ev_match');
   reload(g);
@@ -259,6 +259,7 @@ function createGame(opts) {
 // 먹기/먹이기. 끝나면 endGame까지 처리
 function doEat(g, idx, self) {
   g.last = Date.now();
+  g.idle[idx] = 0;
   const r = eat(g, idx, self);
   if (r !== -1) endGame(g, r);
   return r;
@@ -282,6 +283,7 @@ function useItem(g, idx, it, steal) {
     }
     if (!choices.includes(steal)) return { err: steal + '은(는) 뺏을 수 없어요.' };
     g.last = Date.now();
+    g.idle[idx] = 0;
     all(g, '🤲 ' + name(g, idx) + '님이 상대의 ' + steal + '을(를) 뺏어 먹었다!', 'it_grab');
     res = applyEffect(g, idx, steal);
     if (res.err) return res;
@@ -289,6 +291,7 @@ function useItem(g, idx, it, steal) {
     removeOne(g.items[1 - idx], steal);
   } else {
     g.last = Date.now();
+    g.idle[idx] = 0;
     res = applyEffect(g, idx, it);
     if (res.err) return res;
     if (!res.consumed) removeOne(g.items[idx], it);
@@ -300,6 +303,35 @@ function useItem(g, idx, it, steal) {
 function forfeit(g, idx) {
   all(g, '🏳️ ' + name(g, idx) + '님이 항복했어요.');
   endGame(g, 1 - idx);
+}
+
+const AFK_LOSE = 2; // 연속으로 이만큼 시간 초과하면 패배
+
+function timeText(ms) {
+  const sec = Math.round(ms / 1000), m = Math.floor(sec / 60), s = sec % 60;
+  return (m ? m + '분' : '') + (m && s ? ' ' : '') + (s ? s + '초' : '');
+}
+
+// 차례인 사람이 시간 안에 안 했을 때: 차례 건너뛰기, 연속 AFK_LOSE번이면 패배
+// limitMs: 제한 시간, now: 지금 시각. 결과: 'none' | 'skip' | 'lose'
+function checkAfk(g, limitMs, now) {
+  now = now || Date.now();
+  let happened = 'none';
+  while (!g.over && now - g.last > limitMs) {
+    const p = g.turn;
+    g.idle[p] = (g.idle[p] || 0) + 1;
+    g.stealing = false;
+    if (g.idle[p] >= AFK_LOSE) {
+      all(g, '⏰ ' + name(g, p) + '님이 ' + AFK_LOSE + '번 연속으로 시간 초과! 자리를 비운 걸로 보고 패배');
+      endGame(g, 1 - p);
+      return 'lose';
+    }
+    all(g, '⏰ ' + name(g, p) + '님이 ' + timeText(limitMs) + ' 동안 안 해서 차례를 건너뜀 (한 번 더 놓치면 패배!)');
+    g.last += limitMs;
+    nextTurn(g);
+    happened = 'skip';
+  }
+  return happened;
 }
 
 function timeout(g, minutes) {
@@ -373,6 +405,6 @@ function rulesBasics() {
 module.exports = {
   MAX_HP, MAX_ITEMS, ITEM_LIST, ICON, ITEM_IMG, ITEM_DESC, ALIAS, PRIORITY,
   prio, label, hearts, bag, cut, resolveItem,
-  createGame, doEat, useItem, stealChoices, forfeit, timeout, endGame,
+  createGame, doEat, useItem, stealChoices, forfeit, timeout, checkAfk, timeText, AFK_LOSE, endGame,
   rulesCommon, rulesBasics
 };
