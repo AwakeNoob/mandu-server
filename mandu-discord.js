@@ -668,6 +668,6 @@ function sweep(base) {
 }
 
 module.exports = {
-  verify, handleInteraction, registerCommands, sweep, setFetch, games, lobbies, status, config, activeRanked,
+  verify, handleInteraction, registerCommands, sweep, setFetch, games, lobbies, status, config, activeRanked, COMMANDS,
   enabled: () => !!(APP_ID && PUBLIC_KEY)
 };
