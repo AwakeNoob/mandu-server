@@ -12,7 +12,8 @@ let lastBase = null;
 const { ITEM_LIST, ICON, ITEM_IMG, ITEM_DESC, MAX_HP, prio, hearts, bag, cut, resolveItem } = G;
 
 function name(g, p) { return g.nameOf(p); }
-const TIMEOUT = 10 * 60 * 1000;  // 10분 동안 차례인 사람이 안 하면 시간 초과 패
+const TURN_LIMIT = 3 * 60 * 1000;  // 카톡은 자기 차례 3분 (넘기면 건너뛰기, 연속 2번이면 패배)
+const TIMEOUT = 10 * 60 * 1000;     // 매칭 대기는 10분
 
 // ---------- 저장소 (서버 메모리) ----------
 const users = {};      // 유저ID -> { id, name, inbox, gameId, queued, queuedAt, code }
@@ -52,9 +53,8 @@ function startGame(uidA, uidB) {
 }
 
 function checkTimeout(g) {
-  if (Date.now() - g.last <= TIMEOUT) return false;
-  G.timeout(g, 10);
-  return true;
+  G.checkAfk(g, TURN_LIMIT);
+  return g.over;
 }
 
 function leaveQueue(u) {
@@ -84,7 +84,7 @@ function ruleText() {
     G.rulesBasics() + '\n\n' +
     '【상대 차례일 때】\n' +
     '상대가 한 일은 자동으로 오지 않아요. 🔄새로고침을 눌러서 확인하세요!\n' +
-    '자기 차례에 10분 동안 아무것도 안 하면 시간 초과로 져요.';
+    '자기 차례에 ' + G.timeText(TURN_LIMIT) + ' 안에 안 하면 차례가 넘어가고, ' + G.AFK_LOSE + '번 연속으로 놓치면 져요.';
   return [part1].concat(G.rulesCommon());
 }
 
@@ -357,7 +357,7 @@ if (require.main === module) {
     setInterval(() => {
       const base = lastBase || (process.env.RENDER_EXTERNAL_URL ? process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '') + '/img/' : null);
       if (base) D.sweep(base);
-    }, 30 * 1000);
+    }, 10 * 1000);
     console.log('디스코드 봇 켜짐');
   }
 }
